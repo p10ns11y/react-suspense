@@ -29,21 +29,75 @@ const SUSPENSE_CONFIG = {
   busyMinDurationMs: 700,
 }
 
-// 🐨 create a pokemonResourceCache object
-
-// 🐨 create a getPokemonResource function which accepts a name checks the cache
-// for an existing resource. If there is none, then it creates a resource
-// and inserts it into the cache. Finally the function should return the
-// resource.
-
 function createPokemonResource(pokemonName) {
   return createResource(fetchPokemon(pokemonName))
+}
+
+// const pokemonResourceCache = {}
+// function getPokemonResource(pokemonName) {
+//   let pokemonResource = pokemonResourceCache[pokemonName]
+//   if (!pokemonResource) {
+//     pokemonResource = createPokemonResource(pokemonName)
+//     pokemonResourceCache[pokemonName] = pokemonResource
+//   }
+
+//   return pokemonResource
+// }
+
+const PokemonCacheContext = React.createContext(/*getPokemonResource*/)
+
+function PokemonCacheProvider({children, cacheTime}) {
+  const pokemonResourceCache = React.useRef({})
+  const clearCacheTimers = React.useRef({})
+  const getPokemonResource = React.useCallback(
+    pokemonName => {
+      let pokemonResource = pokemonResourceCache.current[pokemonName]
+      if (!pokemonResource) {
+        pokemonResource = createPokemonResource(pokemonName)
+        pokemonResourceCache.current[pokemonName] = pokemonResource
+      }
+      clearCacheTimers.current[pokemonName] = Date.now() + cacheTime
+
+      return pokemonResource
+    },
+    [cacheTime],
+  )
+
+  React.useEffect(() => {
+    const intervalId = setInterval(() => {
+      Object.entries(clearCacheTimers.current).forEach(([name, time]) => {
+        if (time < Date.now()) {
+          delete pokemonResourceCache.current[name]
+        }
+      })
+    }, 1000)
+
+    return () => clearInterval(intervalId)
+  }, [cacheTime])
+
+  return (
+    <PokemonCacheContext.Provider value={getPokemonResource}>
+      {children}
+    </PokemonCacheContext.Provider>
+  )
+}
+
+function usePokemonResourceCache() {
+  const context = React.useContext(PokemonCacheContext)
+  if (!context) {
+    throw new Error(
+      'usePokemonResourceCache should be used with in PokemonCacheProvider',
+    )
+  }
+
+  return context
 }
 
 function App() {
   const [pokemonName, setPokemonName] = React.useState('')
   const [startTransition, isPending] = React.useTransition(SUSPENSE_CONFIG)
   const [pokemonResource, setPokemonResource] = React.useState(null)
+  const getResource = usePokemonResourceCache()
 
   React.useEffect(() => {
     if (!pokemonName) {
@@ -51,10 +105,9 @@ function App() {
       return
     }
     startTransition(() => {
-      // 🐨 change this to getPokemonResource instead
-      setPokemonResource(createPokemonResource(pokemonName))
+      setPokemonResource(getResource(pokemonName))
     })
-  }, [pokemonName, startTransition])
+  }, [getResource, pokemonName, startTransition])
 
   function handleSubmit(newPokemonName) {
     setPokemonName(newPokemonName)
@@ -88,4 +141,12 @@ function App() {
   )
 }
 
-export default App
+function AppWithCacheProvider() {
+  return (
+    <PokemonCacheProvider cacheTime={15000}>
+      <App />
+    </PokemonCacheProvider>
+  )
+}
+
+export default AppWithCacheProvider
